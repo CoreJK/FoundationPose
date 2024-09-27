@@ -7,18 +7,19 @@ from settings import *
 from pyorbbecsdk import *
 from camera_utils import frame_to_bgr_image
 
+ESC_KEY = 27
 
 class DaBaiCamera(object):
     """奥比中光相机"""
     def __init__(self):
-        self.pipline = Pipeline()
+        self.pipeline = Pipeline()
         self.config = Config()
         self.has_color_sensor = False
 
     def setup_camera_color_config(self):
         """配置相机彩色相关参数"""
         try:
-            profile_list = self.pipline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
+            profile_list = self.pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
             if profile_list is not None:
                 color_profile = profile_list.get_video_stream_profile(640, 480, OBFormat.RGB, 30)
                 self.config.enable_stream(color_profile)
@@ -28,7 +29,7 @@ class DaBaiCamera(object):
             
     def setup_camera_depth_config(self):
         """配置相机深度相关参数"""
-        depth_profile_list = self.pipline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
+        depth_profile_list = self.pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
         if depth_profile_list is not None:
             depth_profile = depth_profile_list.get_video_stream_profile(640, 480, OBFormat.RGB, 30)
             self.config.enable_stream(depth_profile)
@@ -54,19 +55,44 @@ class DaBaiCamera(object):
                 return image_name
 
     def start_capture(self):
-        self.pipline.start(self.config)
+        self.pipeline.start(self.config)
         logger.info("启动相机拍摄")
         while True:
-            frames = self.pipline.wait_for_frames(100)
+            frames = self.pipeline.wait_for_frames(100)
             if frames is None:
                 continue
             else:
                 color_frame = frames.get_color_frame()
                 if color_frame is not None:
                     image_path = self.save_color_frame(color_frame)
-                    self.pipline.stop()
+                    self.pipeline.stop()
                     return image_path
 
+    def start_video_stream(self):
+        """开启视频流"""
+        self.pipeline.start(self.config)
+        while True:
+            try:
+                frames: FrameSet = self.pipeline.wait_for_frames(100)
+                if frames is None:
+                    continue
+                color_frame = frames.get_color_frame()
+                if color_frame is None:
+                    continue
+                # Convert to RGB format
+                color_image = frame_to_bgr_image(color_frame)
+                if color_image is None:
+                    logger.error("failed to convert frame to image")
+                    continue
+                cv2.imshow("Color Viewer", color_image)
+                key = cv2.waitKey(1)
+                if key == ord('q') or key == ESC_KEY:
+                    break
+                if key == ord('s'):
+                    self.save_color_frame(color_frame)
+            except KeyboardInterrupt:
+                break
+        self.pipeline.stop()
 
 def check_camera():
     """开启摄像头，调用摄像头实时画面，按q键退"""
@@ -105,9 +131,4 @@ def check_camera():
 if __name__ == '__main__':
     camera = DaBaiCamera()
     camera.setup_camera_color_config()
-    pic_path = camera.start_capture()
-    logger.info("相机图片采集完成，开始进行目标检测")
-    cv2.imshow("Object Detection", pic_path)
-    cv2.waitKey(0)
-    camera.pipline.stop()
-    cv2.destroyAllWindows()
+    camera.start_video_stream()
