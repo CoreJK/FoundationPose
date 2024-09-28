@@ -1,8 +1,10 @@
+import os
 import time
 import cv2
 from loguru import logger
 from settings import *
 import numpy as np
+import open3d as o3d
 
 # 奥比中光相机 sdk
 from pyorbbecsdk import *
@@ -30,12 +32,11 @@ class TemporalFilter:
 
 class DaBaiCamera(object):
     """奥比中光相机"""
-    
-    
     def __init__(self):
         self.pipeline = Pipeline()
         self.config = Config()
         self.temporal_filter = TemporalFilter(alpha=0.5)
+        self.save_points_dir = os.path.join(os.getcwd(), "point_clouds")
         self.last_print_time = time.time()
         self.has_color_sensor = False
 
@@ -158,9 +159,69 @@ class DaBaiCamera(object):
                 key = cv2.waitKey(1)
                 if key == ord('q') or key == ESC_KEY:
                     break
+                if key == ord('s'):
+                    self.save_points_to_ply(frames, self.pipeline.get_camera_param())
+                if key == ord('c'):
+                    self.save_color_points_to_ply(frames, self.pipeline.get_camera_param())
             except KeyboardInterrupt:
                 break
         self.pipeline.stop()
+    
+    def convert_to_o3d_point_cloud(self, points, colors=None):
+        """
+        Converts numpy arrays of points and colors (if provided) into an Open3D point cloud object.
+        """
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        if colors is not None:
+            pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)  # Assuming colors are in [0, 255]
+        return pcd
+
+    def save_points_to_ply(self, frames, camera_param):
+        """
+        Saves the point cloud data to a PLY file using Open3D.
+        """
+        
+        os.makedirs(self.save_points_dir, exist_ok=True)
+        if frames is None:
+            return 0
+        depth_frame = frames.get_depth_frame()
+        if depth_frame is None:
+            return 0
+        points = frames.get_point_cloud(camera_param)
+        if points is None or len(points) == 0:
+            logger.warning("No points to save.")
+            return 0
+        # Convert points to Open3D point cloud
+        pcd = self.convert_to_o3d_point_cloud(np.array(points))
+        points_filename = os.path.join(self.save_points_dir, f"points_{depth_frame.get_timestamp()}.ply")
+        # Save to PLY file
+        o3d.io.write_point_cloud(points_filename, pcd)
+        logger.info(f"Saved points to {points_filename}")
+
+    def save_color_points_to_ply(self, frames, camera_param):
+        """
+        Saves the color point cloud data to a PLY file using Open3D.
+        """
+        if frames is None:
+            return 0
+        depth_frame = frames.get_depth_frame()
+        if depth_frame is None:
+            return 0
+        points = frames.get_color_point_cloud(camera_param)
+        if points is None or len(points) == 0:
+            logger.warning("No color points to save.")
+            return 0
+        # Assuming the color information is included in the points array
+        # This part might need to be adjusted based on the actual format of the points array
+        xyz = np.array(points[:, :3])
+        colors = np.array(points[:, 3:], dtype=np.uint8)
+        pcd = self.convert_to_o3d_point_cloud(xyz, colors)
+        points_filename = os.path.join(self.save_points_dir, f"color_points_{depth_frame.get_timestamp()}.ply")
+        # Save to PLY file
+        o3d.io.write_point_cloud(points_filename, pcd)
+        logger.info(f"Saved color points to {points_filename}")
+        return 1
 
 if __name__ == '__main__':
     camera = DaBaiCamera()
