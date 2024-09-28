@@ -23,26 +23,33 @@ if __name__=='__main__':
   parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
   args = parser.parse_args()
 
+  # 设置日志格式和随机种子
   set_logging_format()
   set_seed(0)
 
+  # 加载 3D 模型
   mesh = trimesh.load(args.mesh_file)
 
+  # 创建调试目录，根据提供的 debug 参数，决定是否保存调试信息
   debug = args.debug
   debug_dir = args.debug_dir
   os.system(f'rm -rf {debug_dir}/* && mkdir -p {debug_dir}/track_vis {debug_dir}/ob_in_cam')
 
+  # 获取 3D 模型的包围盒，计算模型的边界框
   to_origin, extents = trimesh.bounds.oriented_bounds(mesh)
   bbox = np.stack([-extents/2, extents/2], axis=0).reshape(2,3)
 
+  # 初始化估计器和读取器
   scorer = ScorePredictor()
   refiner = PoseRefinePredictor()
   glctx = dr.RasterizeCudaContext()
   est = FoundationPose(model_pts=mesh.vertices, model_normals=mesh.vertex_normals, mesh=mesh, scorer=scorer, refiner=refiner, debug_dir=debug_dir, debug=debug, glctx=glctx)
   logging.info("estimator initialization done")
 
+  # 处理每一帧图像
   reader = YcbineoatReader(video_dir=args.test_scene_dir, shorter_side=None, zfar=np.inf)
 
+  # 根据读取器的颜色和深度图像，物体的 3D 模型，估计物体的位姿
   for i in range(len(reader.color_files)):
     logging.info(f'i:{i}')
     color = reader.get_color(i)
